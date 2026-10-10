@@ -19,6 +19,7 @@ DEFAULT_WHISPER_MODEL = os.getenv("KHATATALK_WHISPER_MODEL", "small")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("WHISPER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Business Rules / Validation
 MAX_TRANSACTION_AMOUNT = int(os.getenv("KHATATALK_MAX_AMOUNT", "1000000"))  # 1 million PKR limit for sanity check
