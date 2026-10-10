@@ -145,22 +145,39 @@ export default function App() {
   const [pendingTx, setPendingTx] = useState<PendingTx | null>(null);
   const [confirmationPrompt, setConfirmationPrompt] = useState<string | null>(null);
 
-  // Simulated SQLite state
-  const [customers, setCustomers] = useState<Customer[]>([
-    { id: 1, name: "Ahmed", balance: 400, transactionsCount: 2, lastActive: "10 mins ago" },
-    { id: 2, name: "Bilal", balance: 0, transactionsCount: 3, lastActive: "1 hour ago" },
-    { id: 3, name: "Tariq Mahmood", balance: 1850, transactionsCount: 5, lastActive: "Yesterday" },
-    { id: 4, name: "Kamran Khan", balance: 600, transactionsCount: 1, lastActive: "Today" },
-  ]);
+  // Live persistent SQLite-equivalent state (No mock/dummy data)
+  const [customers, setCustomers] = useState<Customer[]>(() => {
+    try {
+      const saved = localStorage.getItem('khattapay_customers');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    { id: 101, customerId: 1, customerName: "Ahmed", type: "credit", amount: 400, item: "cheeni", quantity: "2 kilo", rawText: "Ahmed ko 2 kilo cheeni udhaar di, 400 rupay", timestamp: "Today 10:15 AM" },
-    { id: 102, customerId: 2, customerName: "Bilal", type: "credit", amount: 500, rawText: "Bilal ko 500 udhaar", timestamp: "Today 09:30 AM" },
-    { id: 103, customerId: 2, customerName: "Bilal", type: "payment", amount: 500, rawText: "Bilal ne 500 rupay wapas kiye", timestamp: "Today 11:00 AM" },
-    { id: 104, customerId: 3, customerName: "Tariq Mahmood", type: "credit", amount: 1850, item: "atta & oil", quantity: "1 bag", rawText: "Tariq sahab ko atta udhaar", timestamp: "Yesterday 04:20 PM" },
-  ]);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    try {
+      const saved = localStorage.getItem('khattapay_transactions');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
-  const [reminderTarget, setReminderTarget] = useState('Ahmed');
+  // Auto-sync state changes to persistent storage
+  useEffect(() => {
+    try {
+      localStorage.setItem('khattapay_customers', JSON.stringify(customers));
+    } catch (_) {}
+  }, [customers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('khattapay_transactions', JSON.stringify(transactions));
+    } catch (_) {}
+  }, [transactions]);
+
+  const [reminderTarget, setReminderTarget] = useState('');
   const [generatedReminder, setGeneratedReminder] = useState<string | null>(null);
   const [copiedReminder, setCopiedReminder] = useState(false);
 
@@ -173,11 +190,7 @@ export default function App() {
 
   const recognitionRef = useRef<any>(null);
   const liveTranscriptRef = useRef<string>('');
-  const [speechLang, setSpeechLang] = useState<'ur-PK' | 'hi-IN' | 'en-US'>('ur-PK');
-  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
-  const [clientGeminiKey, setClientGeminiKey] = useState<string>(() => {
-    try { return localStorage.getItem('khatta_gemini_key') || ''; } catch { return ''; }
-  });
+  const [speechLang, setSpeechLang] = useState<'hi-IN' | 'ur-PK' | 'en-US'>('hi-IN');
 
   // ----------------------------------------------------
   // FEATURE 1: Audio Transcription with Web Speech API & Cloud Fallback
@@ -289,43 +302,6 @@ export default function App() {
         const base64Data = (reader.result as string).split(',')[1];
         
         try {
-          // If user configured a client-side Gemini API key, use direct cloud Gemini call
-          const activeKey = clientGeminiKey || (process.env as any).GEMINI_API_KEY;
-          if (activeKey) {
-            try {
-              const geminiRes = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    contents: [
-                      {
-                        parts: [
-                          { inline_data: { mime_type: mimeType || 'audio/webm', data: base64Data } },
-                          { text: "Transcribe this audio verbatim in Urdu, Roman Urdu, or English. Output strictly the transcribed text only." }
-                        ]
-                      }
-                    ]
-                  })
-                }
-              );
-              if (geminiRes.ok) {
-                const gData = await geminiRes.json();
-                const gText = gData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-                if (gText) {
-                  setInputText(gText);
-                  setIsTranscribing(false);
-                  setStatusMessage(`✅ Transcribed via Gemini: "${gText}"`);
-                  setStatusType("success");
-                  return;
-                }
-              }
-            } catch (cErr) {
-              console.warn("Client Gemini call failed, attempting /api/transcribe:", cErr);
-            }
-          }
-
           const res = await fetch('/api/transcribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -943,319 +919,362 @@ export default function App() {
             {statusType === 'info' && <ShieldCheck className="w-5 h-5 text-sky-600 shrink-0" />}
             <span className="font-medium">{statusMessage}</span>
           </div>
-          <span className="text-xs opacity-75 font-mono">CONFIRM-BEFORE-SAVE ACTIVE</span>
+          <span className="text-xs font-mono opacity-75">
+            {isRecording ? 'LIVE RECORDER ACTIVE' : 'SYSTEM READY'}
+          </span>
         </div>
 
         {/* TAB 1: Voice Ledger & Transcription */}
         {activeTab === 'ledger' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Input & Voice Column */}
-            <div className="lg:col-span-6 space-y-4">
-              <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Mic className="w-4 h-4 text-emerald-600" />
-                    <h2 className="text-base font-semibold text-slate-800">
-                      Mic Recording & Transcription
-                    </h2>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <select
-                      value={speechLang}
-                      onChange={(e) => setSpeechLang(e.target.value as any)}
-                      className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg px-2 py-1 font-medium cursor-pointer"
-                      title="Select speech recognition language"
-                    >
-                      <option value="ur-PK">🇵🇰 اردو (Urdu Script)</option>
-                      <option value="hi-IN">🗣️ Roman Urdu / Desi</option>
-                      <option value="en-US">🇬🇧 English</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setApiKeyModalOpen(!apiKeyModalOpen)}
-                      className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-lg font-medium hover:bg-emerald-100 cursor-pointer"
-                      title="Set Gemini / Cloud API Key"
-                    >
-                      ⚙️ API Key
-                    </button>
-                  </div>
+          <div className="space-y-6">
+            {/* MVP Quick Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center space-x-3">
+                <div className="p-2.5 bg-rose-50 rounded-lg text-rose-600">
+                  <TrendingUp className="w-5 h-5" />
                 </div>
-
-                {apiKeyModalOpen && (
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-xs">
-                    <div className="font-semibold text-amber-900">🔑 Cloud AI Key (Optional for Vercel):</div>
-                    <input
-                      type="password"
-                      placeholder="Paste Gemini API Key (AIzaSy...)"
-                      value={clientGeminiKey}
-                      onChange={(e) => {
-                        setClientGeminiKey(e.target.value);
-                        try { localStorage.setItem('khatta_gemini_key', e.target.value); } catch (_) {}
-                      }}
-                      className="w-full p-2 bg-white border border-amber-300 rounded-lg text-xs"
-                    />
-                    <div className="text-slate-500">
-                      Get a 100% free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-emerald-700 underline font-semibold">Google AI Studio</a>. Saved in your browser only.
-                    </div>
-                  </div>
-                )}
-
-                {/* Voice button and input area */}
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={isRecordingTranscribe ? stopRecordingTranscribe : startRecordingTranscribe}
-                      disabled={isTranscribing}
-                      className={`py-2 px-4 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 shadow-xs cursor-pointer ${
-                        isRecordingTranscribe
-                          ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
-                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      }`}
-                    >
-                      {isRecordingTranscribe ? (
-                        <>
-                          <Square className="w-4 h-4" />
-                          <span>Stop Recording (آواز روکیں)</span>
-                        </>
-                      ) : (
-                        <>
-                          <Mic className="w-4 h-4" />
-                          <span>Record Mic (آواز ریکارڈ کریں)</span>
-                        </>
-                      )}
-                    </button>
-                    
-                    <div className="text-xs text-slate-600">
-                      {isRecordingTranscribe && (
-                        <span className="text-rose-600 font-bold flex items-center space-x-1 animate-pulse">
-                          <span>● Recording active...</span>
-                        </span>
-                      )}
-                      {isTranscribing && (
-                        <span className="text-emerald-700 font-semibold flex items-center space-x-1.5">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Transcribing with gemini-3.5-transcribe...</span>
-                        </span>
-                      )}
-                      {!isRecordingTranscribe && !isTranscribing && (
-                        <span>Taps mic, captures audio, transcribes with <b>gemini-3.5-transcribe</b>.</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="relative">
-                    <textarea
-                      rows={3}
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      placeholder="Bolain ya likhein (e.g. Ahmed ko do kilo cheeni udhaar di, 400 rupay)..."
-                      className="w-full p-3 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden font-medium"
-                    />
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => processInput()}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
-                    >
-                      <Send className="w-4 h-4" />
-                      <span>Process Utterance (امداد / کھاتہ لکھیں)</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setInputText('');
-                        setPendingTx(null);
-                        setConfirmationPrompt(null);
-                      }}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 px-3 rounded-xl text-sm font-medium transition-colors cursor-pointer"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                {/* Sample Utterance Chips */}
-                <div className="pt-2 border-t border-slate-100">
-                  <p className="text-xs font-semibold text-slate-500 mb-2">
-                    💡 Sample Dukandar Utterances (Click to test):
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {samples.map((s, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          setInputText(s.text);
-                          processInput(s.text);
-                        }}
-                        className="text-left text-xs p-2 rounded-lg bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-slate-700 transition-colors flex items-center justify-between group cursor-pointer"
-                      >
-                        <div className="truncate mr-1">
-                          <span className="font-semibold text-slate-900 block truncate">{s.label}</span>
-                          <span className="text-slate-500 text-[11px] truncate block">{s.text}</span>
-                        </div>
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 shrink-0" />
-                      </button>
-                    ))}
-                  </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-medium block">Kul Udhaar (Credit)</span>
+                  <span className="text-base font-bold text-rose-600 font-mono">
+                    Rs {customers.filter(c => c.balance > 0).reduce((s, c) => s + c.balance, 0).toLocaleString()}
+                  </span>
                 </div>
               </div>
 
-              {/* CONFIRM-BEFORE-SAVE PANEL */}
-              {pendingTx && confirmationPrompt && (
-                <div className="bg-amber-50/90 border-2 border-amber-400 p-5 rounded-2xl shadow-md space-y-3 animate-in fade-in">
-                  <div className="flex items-center space-x-2 text-amber-900 font-bold text-sm">
-                    <AlertTriangle className="w-5 h-5 text-amber-600" />
-                    <span>Tasdeeq Darkaar Hai (Confirm Before Save)</span>
-                  </div>
-                  
-                  <div className="p-3 bg-white rounded-xl border border-amber-200 text-sm space-y-1">
-                    <div className="font-semibold text-slate-900">{confirmationPrompt}</div>
-                    <div className="text-xs text-slate-500 font-mono flex items-center gap-3 pt-1">
-                      <span>Customer: <b>{pendingTx.customerName}</b></span>
-                      <span>Type: <b>{pendingTx.type.toUpperCase()}</b></span>
-                      <span>Amount: <b>Rs {pendingTx.amount.toLocaleString()}</b></span>
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-50 rounded-lg text-emerald-600">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-medium block">Kul Wasooli (Paid)</span>
+                  <span className="text-base font-bold text-emerald-700 font-mono">
+                    Rs {transactions.filter(t => t.type === 'payment').reduce((s, t) => s + t.amount, 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center space-x-3">
+                <div className="p-2.5 bg-sky-50 rounded-lg text-sky-600">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-medium block">Total Customers</span>
+                  <span className="text-base font-bold text-slate-900 font-mono">{customers.length}</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center space-x-3">
+                <div className="p-2.5 bg-amber-50 rounded-lg text-amber-600">
+                  <Cpu className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-medium block">Local Intelligence</span>
+                  <span className="text-xs font-bold text-slate-900 font-mono">Ollama & Whisper</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Input & Voice Column */}
+              <div className="lg:col-span-6 space-y-4">
+                <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Mic className="w-4 h-4 text-emerald-600" />
+                      <h2 className="text-base font-semibold text-slate-800">
+                        Mic Recording & Transcription
+                      </h2>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[11px] text-slate-400 font-medium">Zabaan:</span>
+                      <select
+                        value={speechLang}
+                        onChange={(e) => setSpeechLang(e.target.value as any)}
+                        className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg px-2.5 py-1 font-medium cursor-pointer"
+                        title="Select speech recognition language"
+                      >
+                        <option value="hi-IN">🗣️ Roman Urdu / Desi</option>
+                        <option value="ur-PK">🇵🇰 اردو (Urdu Script)</option>
+                        <option value="en-US">🇬🇧 English</option>
+                      </select>
                     </div>
                   </div>
 
-                  <p className="text-xs text-amber-800">
-                    🛡️ <b>Safety Principle:</b> Database mein kuch nahi likha gaya. Tasdeeq ke baad hi SQLite ledger mein darj hoga.
-                  </p>
-
-                  <div className="flex space-x-3 pt-1">
-                    <button
-                      onClick={handleConfirm}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-xl text-sm transition-colors flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>Confirm & Save to SQLite</span>
-                    </button>
-                    <button
-                      onClick={handleCancel}
-                      className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium py-2 px-4 rounded-xl text-sm transition-colors flex items-center justify-center space-x-2 cursor-pointer"
-                    >
-                      <XCircle className="w-4 h-4" />
-                      <span>Cancel (رد کریں)</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Live Ledger Table Column */}
-            <div className="lg:col-span-6 space-y-4">
-              <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-800 flex items-center space-x-2">
-                      <BookOpen className="w-4 h-4 text-emerald-600" />
-                      <span>Customer Khata Ledger (کھاتہ رجسٹر)</span>
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Balance = SUM(credit) - SUM(payment) strictly in SQLite
-                    </p>
-                  </div>
-                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-mono">
-                    {customers.length} Customers
-                  </span>
-                </div>
-
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 uppercase tracking-wider">
-                      <tr>
-                        <th className="py-2.5 px-3">Customer</th>
-                        <th className="py-2.5 px-3">Balance (PKR)</th>
-                        <th className="py-2.5 px-3">Status</th>
-                        <th className="py-2.5 px-3">Entries</th>
-                        <th className="py-2.5 px-3">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium">
-                      {customers.map((c) => (
-                        <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="py-2.5 px-3 font-semibold text-slate-900">{c.name}</td>
-                          <td className="py-2.5 px-3 font-mono font-bold">
-                            {c.balance > 0 ? (
-                              <span className="text-rose-600">Rs {c.balance.toLocaleString()}</span>
-                            ) : c.balance === 0 ? (
-                              <span className="text-emerald-600">Rs 0 (Clear)</span>
-                            ) : (
-                              <span className="text-sky-600">Rs {Math.abs(c.balance).toLocaleString()} (Adv)</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                                c.balance > 0
-                                  ? 'bg-rose-100 text-rose-800'
-                                  : c.balance === 0
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-sky-100 text-sky-800'
-                              }`}
-                            >
-                              {c.balance > 0 ? 'Udhaar Owed' : c.balance === 0 ? 'Paid' : 'Advance'}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-500 font-mono">{c.transactionsCount}</td>
-                          <td className="py-2.5 px-3">
-                            {c.balance > 0 && (
-                              <button
-                                onClick={() => {
-                                  setReminderTarget(c.name);
-                                  createReminder(c.name);
-                                  setActiveTab('analytics');
-                                }}
-                                className="text-emerald-700 hover:text-emerald-800 font-semibold text-xs flex items-center space-x-1 cursor-pointer"
-                              >
-                                <MessageSquare className="w-3 h-3" />
-                                <span>Reminder</span>
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Recent transaction history log */}
-                <div className="pt-2">
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                    Recent Verified Transactions
-                  </h3>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {transactions.slice(0, 5).map((t) => (
-                      <div
-                        key={t.id}
-                        className="p-2 rounded-lg bg-slate-50 border border-slate-200/80 text-xs flex items-center justify-between"
+                  {/* Voice button and input area */}
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={isRecordingTranscribe ? stopRecordingTranscribe : startRecordingTranscribe}
+                        disabled={isTranscribing}
+                        className={`py-2 px-4 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 shadow-xs cursor-pointer ${
+                          isRecordingTranscribe
+                            ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        }`}
                       >
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-semibold text-slate-900">{t.customerName}</span>
-                            <span
-                              className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                                t.type === 'credit'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-emerald-100 text-emerald-800'
-                              }`}
-                            >
-                              {t.type.toUpperCase()}
-                            </span>
-                            {t.item && <span className="text-slate-500">[{t.quantity || ''} {t.item}]</span>}
-                          </div>
-                          <span className="text-[11px] text-slate-400 italic truncate block max-w-xs">
-                            "{t.rawText}"
+                        {isRecordingTranscribe ? (
+                          <>
+                            <Square className="w-4 h-4" />
+                            <span>Stop Recording (آواز روکیں)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Mic className="w-4 h-4" />
+                            <span>Record Mic (آواز ریکارڈ کریں)</span>
+                          </>
+                        )}
+                      </button>
+                      
+                      <div className="text-xs text-slate-600">
+                        {isRecordingTranscribe && (
+                          <span className="text-rose-600 font-bold flex items-center space-x-1 animate-pulse">
+                            <span>● Recording active...</span>
                           </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-mono font-bold block text-slate-900">
-                            {t.type === 'credit' ? '+' : '-'}Rs {t.amount.toLocaleString()}
+                        )}
+                        {isTranscribing && (
+                          <span className="text-emerald-700 font-semibold flex items-center space-x-1.5">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Aawaz analyze ho rahi hai...</span>
                           </span>
-                          <span className="text-[10px] text-slate-400">{t.timestamp}</span>
-                        </div>
+                        )}
+                        {!isRecordingTranscribe && !isTranscribing && (
+                          <span>Mic tap karein aur bolain (e.g. <b>"Ahmed ko 500 rupay udhaar"</b>).</span>
+                        )}
                       </div>
-                    ))}
+                    </div>
+
+                    <div className="relative">
+                      <textarea
+                        rows={3}
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        placeholder="Bolain ya likhein (e.g. Ahmed ko do kilo cheeni udhaar di, 400 rupay)..."
+                        className="w-full p-3 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden font-medium"
+                      />
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => processInput()}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>Process Utterance (امداد / کھاتہ لکھیں)</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setInputText('');
+                          setPendingTx(null);
+                          setConfirmationPrompt(null);
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 px-3 rounded-xl text-sm font-medium transition-colors cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Sample Utterance Chips */}
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-xs font-semibold text-slate-500 mb-2">
+                      💡 Quick Dukandar Samples (Click to test):
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {samples.map((s, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            setInputText(s.text);
+                            processInput(s.text);
+                          }}
+                          className="text-left text-xs p-2 rounded-lg bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-slate-700 transition-colors flex items-center justify-between group cursor-pointer"
+                        >
+                          <div className="truncate mr-1">
+                            <span className="font-semibold text-slate-900 block truncate">{s.label}</span>
+                            <span className="text-slate-500 text-[11px] truncate block">{s.text}</span>
+                          </div>
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* CONFIRM-BEFORE-SAVE PANEL */}
+                {pendingTx && confirmationPrompt && (
+                  <div className="bg-amber-50/90 border-2 border-amber-400 p-5 rounded-2xl shadow-md space-y-3 animate-in fade-in">
+                    <div className="flex items-center space-x-2 text-amber-900 font-bold text-sm">
+                      <AlertTriangle className="w-5 h-5 text-amber-600" />
+                      <span>Tasdeeq Darkaar Hai (Confirm Before Save)</span>
+                    </div>
+                    
+                    <div className="p-3 bg-white rounded-xl border border-amber-200 text-sm space-y-1">
+                      <div className="font-semibold text-slate-900">{confirmationPrompt}</div>
+                      <div className="text-xs text-slate-500 font-mono flex items-center gap-3 pt-1">
+                        <span>Customer: <b>{pendingTx.customerName}</b></span>
+                        <span>Type: <b>{pendingTx.type.toUpperCase()}</b></span>
+                        <span>Amount: <b>Rs {pendingTx.amount.toLocaleString()}</b></span>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-amber-800">
+                      🛡️ <b>Safety Principle:</b> Database mein kuch nahi likha gaya. Tasdeeq ke baad hi ledger mein darj hoga.
+                    </p>
+
+                    <div className="flex space-x-3 pt-1">
+                      <button
+                        onClick={handleConfirm}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-xl text-sm transition-colors flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Confirm & Save to Ledger</span>
+                      </button>
+                      <button
+                        onClick={handleCancel}
+                        className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium py-2 px-4 rounded-xl text-sm transition-colors flex items-center justify-center space-x-2 cursor-pointer"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        <span>Cancel (رد کریں)</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Live Ledger Table Column */}
+              <div className="lg:col-span-6 space-y-4">
+                <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-800 flex items-center space-x-2">
+                        <BookOpen className="w-4 h-4 text-emerald-600" />
+                        <span>Customer Khata Ledger (کھاتہ رجسٹر)</span>
+                      </h2>
+                      <p className="text-xs text-slate-500">
+                        Balance = SUM(credit) - SUM(payment) strictly deterministic
+                      </p>
+                    </div>
+                    <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full font-mono">
+                      {customers.length} Customers
+                    </span>
+                  </div>
+
+                  {customers.length === 0 ? (
+                    <div className="text-center py-10 px-4 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+                      <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-2">
+                        <BookOpen className="w-5 h-5" />
+                      </div>
+                      <h3 className="text-sm font-semibold text-slate-800">Ledger Khali Hai (No Customers Yet)</h3>
+                      <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1">
+                        Pehla hisaab darj karne ke liye mic par bolain ya quick samples par click karein.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 uppercase tracking-wider">
+                          <tr>
+                            <th className="py-2.5 px-3">Customer</th>
+                            <th className="py-2.5 px-3">Balance (PKR)</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3">Entries</th>
+                            <th className="py-2.5 px-3">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {customers.map((c) => (
+                            <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-2.5 px-3 font-semibold text-slate-900">{c.name}</td>
+                              <td className="py-2.5 px-3 font-mono font-bold">
+                                {c.balance > 0 ? (
+                                  <span className="text-rose-600">Rs {c.balance.toLocaleString()}</span>
+                                ) : c.balance === 0 ? (
+                                  <span className="text-emerald-600">Rs 0 (Clear)</span>
+                                ) : (
+                                  <span className="text-sky-600">Rs {Math.abs(c.balance).toLocaleString()} (Adv)</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                                    c.balance > 0
+                                      ? 'bg-rose-100 text-rose-800'
+                                      : c.balance === 0
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-sky-100 text-sky-800'
+                                  }`}
+                                >
+                                  {c.balance > 0 ? 'Udhaar Owed' : c.balance === 0 ? 'Paid' : 'Advance'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-500 font-mono">{c.transactionsCount}</td>
+                              <td className="py-2.5 px-3">
+                                {c.balance > 0 && (
+                                  <button
+                                    onClick={() => {
+                                      setReminderTarget(c.name);
+                                      createReminder(c.name);
+                                      setActiveTab('analytics');
+                                    }}
+                                    className="text-emerald-700 hover:text-emerald-800 font-semibold text-xs flex items-center space-x-1 cursor-pointer"
+                                  >
+                                    <MessageSquare className="w-3 h-3" />
+                                    <span>Reminder</span>
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Recent transaction history log */}
+                  <div className="pt-2">
+                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                      Recent Verified Transactions
+                    </h3>
+                    {transactions.length === 0 ? (
+                      <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 text-center text-xs text-slate-500">
+                        Abhi tak koi transaction record nahi hui. Nayi entry save hone par yahan show hogi.
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {transactions.slice(0, 5).map((t) => (
+                          <div
+                            key={t.id}
+                            className="p-2 rounded-lg bg-slate-50 border border-slate-200/80 text-xs flex items-center justify-between"
+                          >
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-semibold text-slate-900">{t.customerName}</span>
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                    t.type === 'credit'
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : 'bg-emerald-100 text-emerald-800'
+                                  }`}
+                                >
+                                  {t.type.toUpperCase()}
+                                </span>
+                                {t.item && <span className="text-slate-500">[{t.quantity || ''} {t.item}]</span>}
+                              </div>
+                              <span className="text-[11px] text-slate-400 italic truncate block max-w-xs">
+                                "{t.rawText}"
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="font-mono font-bold block text-slate-900">
+                                {t.type === 'credit' ? '+' : '-'}Rs {t.amount.toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-slate-400">{t.timestamp}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1422,16 +1441,22 @@ export default function App() {
               <div>
                 <h3 className="text-xs font-semibold text-slate-700 mb-2">🏆 Top Debtors (سب سے زیادہ ادھار):</h3>
                 <div className="space-y-1.5">
-                  {[...customers]
-                    .sort((a, b) => b.balance - a.balance)
-                    .filter(c => c.balance > 0)
-                    .slice(0, 4)
-                    .map((c, i) => (
-                      <div key={c.id} className="p-2 bg-slate-50 rounded-lg flex items-center justify-between text-xs">
-                        <span className="font-semibold text-slate-900">{i + 1}. {c.name}</span>
-                        <span className="font-mono font-bold text-rose-600">Rs {c.balance.toLocaleString()}</span>
-                      </div>
-                    ))}
+                  {customers.filter(c => c.balance > 0).length === 0 ? (
+                    <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-lg text-slate-400 text-xs text-center">
+                      Koi baqaya udhaar nahi hai. Sab hisab clear hai.
+                    </div>
+                  ) : (
+                    [...customers]
+                      .sort((a, b) => b.balance - a.balance)
+                      .filter(c => c.balance > 0)
+                      .slice(0, 4)
+                      .map((c, i) => (
+                        <div key={c.id} className="p-2 bg-slate-50 rounded-lg flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-900">{i + 1}. {c.name}</span>
+                          <span className="font-mono font-bold text-rose-600">Rs {c.balance.toLocaleString()}</span>
+                        </div>
+                      ))
+                  )}
                 </div>
               </div>
             </div>
