@@ -172,12 +172,19 @@ export default function App() {
   }, []);
 
   const recognitionRef = useRef<any>(null);
+  const liveTranscriptRef = useRef<string>('');
+  const [speechLang, setSpeechLang] = useState<'ur-PK' | 'hi-IN' | 'en-US'>('ur-PK');
+  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+  const [clientGeminiKey, setClientGeminiKey] = useState<string>(() => {
+    try { return localStorage.getItem('khatta_gemini_key') || ''; } catch { return ''; }
+  });
 
   // ----------------------------------------------------
   // FEATURE 1: Audio Transcription with Web Speech API & Cloud Fallback
   // ----------------------------------------------------
   const startRecordingTranscribe = async () => {
     try {
+      liveTranscriptRef.current = '';
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
       
@@ -204,7 +211,7 @@ export default function App() {
       if (SpeechRecognitionClass) {
         try {
           const recognition = new SpeechRecognitionClass();
-          recognition.lang = 'ur-PK';
+          recognition.lang = speechLang;
           recognition.interimResults = true;
           recognition.continuous = true;
           recognition.maxAlternatives = 1;
@@ -215,13 +222,19 @@ export default function App() {
               transcriptText += event.results[i][0].transcript;
             }
             if (transcriptText.trim()) {
+              liveTranscriptRef.current = transcriptText.trim();
               setInputText(transcriptText.trim());
-              setStatusMessage(`Sun raha hoon: "${transcriptText.trim()}"`);
+              setStatusMessage(`Sun raha hoon (${speechLang}): "${transcriptText.trim()}"`);
+              setStatusType("info");
             }
           };
 
           recognition.onerror = (recErr: any) => {
             console.warn("SpeechRecognition notice:", recErr.error);
+            if (recErr.error === 'language-not-supported' && speechLang !== 'hi-IN') {
+              setStatusMessage("Urdu speech pack not in browser; switching to Roman Urdu / Hindi phonetic mode.");
+              setSpeechLang('hi-IN');
+            }
           };
 
           recognition.start();
@@ -259,10 +272,12 @@ export default function App() {
   };
 
   const submitAudioForTranscription = async (blob: Blob, mimeType: string) => {
-    // If browser speech recognition already captured text, use it directly!
-    if (inputText && inputText.trim()) {
+    // 1. If browser speech recognition captured text in ref, use it immediately!
+    const captured = (liveTranscriptRef.current || '').trim();
+    if (captured) {
+      setInputText(captured);
       setIsTranscribing(false);
-      setStatusMessage(`✅ Aawaz kamyabi se record ho gayi: "${inputText.trim()}"`);
+      setStatusMessage(`✅ Aawaz kamyabi se record ho gayi: "${captured}"`);
       setStatusType("success");
       return;
     }
@@ -274,6 +289,43 @@ export default function App() {
         const base64Data = (reader.result as string).split(',')[1];
         
         try {
+          // If user configured a client-side Gemini API key, use direct cloud Gemini call
+          const activeKey = clientGeminiKey || (process.env as any).GEMINI_API_KEY;
+          if (activeKey) {
+            try {
+              const geminiRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [
+                      {
+                        parts: [
+                          { inline_data: { mime_type: mimeType || 'audio/webm', data: base64Data } },
+                          { text: "Transcribe this audio verbatim in Urdu, Roman Urdu, or English. Output strictly the transcribed text only." }
+                        ]
+                      }
+                    ]
+                  })
+                }
+              );
+              if (geminiRes.ok) {
+                const gData = await geminiRes.json();
+                const gText = gData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+                if (gText) {
+                  setInputText(gText);
+                  setIsTranscribing(false);
+                  setStatusMessage(`✅ Transcribed via Gemini: "${gText}"`);
+                  setStatusType("success");
+                  return;
+                }
+              }
+            } catch (cErr) {
+              console.warn("Client Gemini call failed, attempting /api/transcribe:", cErr);
+            }
+          }
+
           const res = await fetch('/api/transcribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -888,10 +940,46 @@ export default function App() {
                       Mic Recording & Transcription
                     </h2>
                   </div>
-                  <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-mono">
-                    gemini-3.5-transcribe
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <select
+                      value={speechLang}
+                      onChange={(e) => setSpeechLang(e.target.value as any)}
+                      className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg px-2 py-1 font-medium cursor-pointer"
+                      title="Select speech recognition language"
+                    >
+                      <option value="ur-PK">🇵🇰 اردو (Urdu Script)</option>
+                      <option value="hi-IN">🗣️ Roman Urdu / Desi</option>
+                      <option value="en-US">🇬🇧 English</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setApiKeyModalOpen(!apiKeyModalOpen)}
+                      className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-lg font-medium hover:bg-emerald-100 cursor-pointer"
+                      title="Set Gemini / Cloud API Key"
+                    >
+                      ⚙️ API Key
+                    </button>
+                  </div>
                 </div>
+
+                {apiKeyModalOpen && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-xs">
+                    <div className="font-semibold text-amber-900">🔑 Cloud AI Key (Optional for Vercel):</div>
+                    <input
+                      type="password"
+                      placeholder="Paste Gemini API Key (AIzaSy...)"
+                      value={clientGeminiKey}
+                      onChange={(e) => {
+                        setClientGeminiKey(e.target.value);
+                        try { localStorage.setItem('khatta_gemini_key', e.target.value); } catch (_) {}
+                      }}
+                      className="w-full p-2 bg-white border border-amber-300 rounded-lg text-xs"
+                    />
+                    <div className="text-slate-500">
+                      Get a 100% free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-emerald-700 underline font-semibold">Google AI Studio</a>. Saved in your browser only.
+                    </div>
+                  </div>
+                )}
 
                 {/* Voice button and input area */}
                 <div className="space-y-3">
