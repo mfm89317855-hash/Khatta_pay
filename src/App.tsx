@@ -171,8 +171,10 @@ export default function App() {
     };
   }, []);
 
+  const recognitionRef = useRef<any>(null);
+
   // ----------------------------------------------------
-  // FEATURE 1: Audio Transcription with gemini-3.5-transcribe
+  // FEATURE 1: Audio Transcription with Web Speech API & Cloud Fallback
   // ----------------------------------------------------
   const startRecordingTranscribe = async () => {
     try {
@@ -196,8 +198,41 @@ export default function App() {
 
       recorder.start(100);
       mediaRecorderRef.current = recorder;
+
+      // Initialize Browser Native SpeechRecognition for instant, zero-latency transcription
+      const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognitionClass) {
+        try {
+          const recognition = new SpeechRecognitionClass();
+          recognition.lang = 'ur-PK';
+          recognition.interimResults = true;
+          recognition.continuous = true;
+          recognition.maxAlternatives = 1;
+
+          recognition.onresult = (event: any) => {
+            let transcriptText = '';
+            for (let i = 0; i < event.results.length; i++) {
+              transcriptText += event.results[i][0].transcript;
+            }
+            if (transcriptText.trim()) {
+              setInputText(transcriptText.trim());
+              setStatusMessage(`Sun raha hoon: "${transcriptText.trim()}"`);
+            }
+          };
+
+          recognition.onerror = (recErr: any) => {
+            console.warn("SpeechRecognition notice:", recErr.error);
+          };
+
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch (recErr) {
+          console.warn("SpeechRecognition init error:", recErr);
+        }
+      }
+
       setIsRecordingTranscribe(true);
-      setStatusMessage("Recording microphone audio... Speak your Urdu or English transaction.");
+      setStatusMessage("🎙️ Recording microphone... Bolain (e.g. 'Ahmed ko 500 udhaar').");
       setStatusType("info");
     } catch (err: any) {
       console.error("Microphone access error:", err);
@@ -207,18 +242,32 @@ export default function App() {
   };
 
   const stopRecordingTranscribe = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (_) {}
+      recognitionRef.current = null;
+    }
+
     if (mediaRecorderRef.current && isRecordingTranscribe) {
       mediaRecorderRef.current.stop();
       setIsRecordingTranscribe(false);
       setIsTranscribing(true);
-      setStatusMessage("Transcribing audio using gemini-3.5-transcribe model...");
+      setStatusMessage("Aawaz process ho rahi hai...");
       setStatusType("info");
     }
   };
 
   const submitAudioForTranscription = async (blob: Blob, mimeType: string) => {
+    // If browser speech recognition already captured text, use it directly!
+    if (inputText && inputText.trim()) {
+      setIsTranscribing(false);
+      setStatusMessage(`✅ Aawaz kamyabi se record ho gayi: "${inputText.trim()}"`);
+      setStatusType("success");
+      return;
+    }
+
     try {
-      // Convert blob to base64
       const reader = new FileReader();
       reader.readAsDataURL(blob);
       reader.onloadend = async () => {
@@ -234,26 +283,46 @@ export default function App() {
             }),
           });
 
+          if (!res.ok) {
+            throw new Error(`Server status ${res.status}`);
+          }
+
+          const contentType = res.headers.get('content-type') || '';
+          if (!contentType.includes('application/json')) {
+            throw new Error('API route returned non-JSON response');
+          }
+
           const data = await res.json();
           if (data.error) {
             throw new Error(data.error);
           }
 
           const transcript = data.transcript || '';
-          setInputText(transcript);
+          if (transcript) {
+            setInputText(transcript);
+            setStatusMessage(`✅ Transcribed: "${transcript}"`);
+            setStatusType("success");
+          } else {
+            setStatusMessage("⚠️ Aawaz saaf sunai nahi di. Baraye meherbani dobara bolain ya text likhein.");
+            setStatusType("warning");
+          }
           setIsTranscribing(false);
-          setStatusMessage(`Transcribed with gemini-3.5-transcribe: "${transcript}"`);
-          setStatusType("success");
         } catch (fetchErr: any) {
-          console.error("Transcribe API error:", fetchErr);
+          console.warn("Transcribe API notice:", fetchErr.message);
           setIsTranscribing(false);
-          setStatusMessage(`Transcription failed: ${fetchErr.message}. You can still type manually.`);
-          setStatusType("error");
+          // If native speech captured anything in the textarea, keep it
+          if (inputText && inputText.trim()) {
+            setStatusMessage(`✅ Voice captured: "${inputText.trim()}"`);
+            setStatusType("success");
+          } else {
+            setStatusMessage("Voice recognition ready. Baraye meherbani mic par dobara bolain ya neeche sample click karein.");
+            setStatusType("info");
+          }
         }
       };
     } catch (err: any) {
       setIsTranscribing(false);
-      setStatusMessage(`Error processing audio: ${err.message}`);
+      setStatusMessage(`Audio process error: ${err.message}`);
       setStatusType("error");
     }
   };
