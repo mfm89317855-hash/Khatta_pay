@@ -292,6 +292,7 @@ export default function App() {
       setIsTranscribing(false);
       setStatusMessage(`✅ Aawaz kamyabi se record ho gayi: "${captured}"`);
       setStatusType("success");
+      processInput(captured);
       return;
     }
 
@@ -330,6 +331,7 @@ export default function App() {
             setInputText(transcript);
             setStatusMessage(`✅ Transcribed: "${transcript}"`);
             setStatusType("success");
+            processInput(transcript);
           } else {
             setStatusMessage("⚠️ Aawaz saaf sunai nahi di. Baraye meherbani dobara bolain ya text likhein.");
             setStatusType("warning");
@@ -338,10 +340,11 @@ export default function App() {
         } catch (fetchErr: any) {
           console.warn("Transcribe API notice:", fetchErr.message);
           setIsTranscribing(false);
-          // If native speech captured anything in the textarea, keep it
+          // If native speech captured anything in the textarea, keep it and process
           if (inputText && inputText.trim()) {
             setStatusMessage(`✅ Voice captured: "${inputText.trim()}"`);
             setStatusType("success");
+            processInput(inputText.trim());
           } else {
             setStatusMessage("Voice recognition ready. Baraye meherbani mic par dobara bolain ya neeche sample click karein.");
             setStatusType("info");
@@ -459,8 +462,13 @@ export default function App() {
 
       ws.onerror = (err) => {
         console.error("Live WebSocket error:", err);
-        setStatusMessage("WebSocket connection to Gemini Live failed. Check server logs.");
-        setStatusType("error");
+        const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+        setStatusMessage(
+          isVercel
+            ? "⚠️ Full-duplex WebSocket Live API requires a persistent server (e.g. Hugging Face Spaces or Python server). Baraye meherbani Voice Ledger (Tab 1) use karein!"
+            : "WebSocket connection to Gemini Live failed. Check backend server."
+        );
+        setStatusType("warning");
         setLiveStatus('idle');
         setIsLiveActive(false);
       };

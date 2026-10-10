@@ -1,5 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "http";
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "10mb",
+    },
+  },
+};
+
 export default async function handler(req: any, res: any) {
   // Set CORS headers
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -20,7 +28,13 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { audioData, mimeType } = req.body || {};
+    let body = req.body;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch (_) {}
+    }
+    const { audioData, mimeType } = body || {};
     if (!audioData) {
       return res.status(400).json({ error: "Missing audioData in request body." });
     }
