@@ -31,14 +31,19 @@ except ImportError:
 # Global model cache to avoid reloading weights repeatedly
 _CACHED_WHISPER_MODEL = None
 _CACHED_MODEL_SIZE = None
+_OPENAI_EXHAUSTED = False
 
 
 def transcribe_with_whisper_api(audio_file_path: Union[str, Path], api_key: str) -> Optional[str]:
     """Transcribes audio using OpenAI Whisper API ('whisper-1')."""
+    global _OPENAI_EXHAUSTED
+    if _OPENAI_EXHAUSTED:
+        return None
+
     path_str = str(audio_file_path)
     try:
         import openai
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.OpenAI(api_key=api_key, max_retries=0)
         with open(path_str, "rb") as audio_file:
             transcript_obj = client.audio.transcriptions.create(
                 model="whisper-1",
@@ -50,7 +55,12 @@ def transcribe_with_whisper_api(audio_file_path: Union[str, Path], api_key: str)
                 logger.info("Successfully transcribed audio via Whisper API ('whisper-1').")
                 return text.strip()
     except Exception as e:
-        logger.warning("Whisper API transcription failed (%s). Falling back to local faster-whisper.", e)
+        err_str = str(e)
+        if "insufficient_quota" in err_str or "429" in err_str or "credit_balance_exhausted" in err_str:
+            _OPENAI_EXHAUSTED = True
+            logger.warning("OpenAI API quota exhausted. Switched instantly to offline local faster-whisper for all subsequent voice requests.")
+        else:
+            logger.warning("Whisper API transcription failed (%s). Falling back to local faster-whisper.", e)
     return None
 
 

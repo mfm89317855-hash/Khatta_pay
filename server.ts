@@ -58,6 +58,64 @@ app.post("/api/transcribe", async (req, res) => {
   }
 });
 
+// API Route: Process transaction via local Ollama model
+app.post("/api/process", async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Missing text to process" });
+    }
+
+    const model = process.env.KHATATALK_MODEL || "qwen2.5:3b";
+    const host = process.env.OLLAMA_HOST || "http://localhost:11434";
+
+    const prompt = `You are a ledger parser for Pakistani dukandaars.
+Analyze this utterance in Urdu, Roman Urdu, or English: "${text.trim()}"
+Output STRICT JSON with keys:
+- "intent": "add_credit" (giving udhaar) | "add_payment" (receiving money back) | "ask_balance" | "daily_summary" | "top_debtors" | "unknown"
+- "customer": extracted customer name without honorifics like bhai, sahab, sb
+- "amount": integer rupee amount, or null
+- "item": item name if mentioned, or null
+- "quantity": quantity if mentioned, or null`;
+
+    try {
+      const ollamaRes = await fetch(`${host}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          prompt,
+          format: "json",
+          stream: false,
+          options: { temperature: 0.0 },
+        }),
+      });
+
+      if (ollamaRes.ok) {
+        const oData = await ollamaRes.json();
+        const parsed = JSON.parse(oData.response);
+        return res.json({
+          status: "success",
+          source: "local_ollama",
+          model,
+          parsed,
+        });
+      }
+    } catch (ollamaErr: any) {
+      console.warn("Local Ollama call notice:", ollamaErr.message);
+    }
+
+    // Heuristic fallback if Ollama is offline
+    return res.json({
+      status: "fallback",
+      source: "rule_engine",
+      rawText: text.trim(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // API Route: Health & status
 app.get("/api/health", (req, res) => {
   res.json({

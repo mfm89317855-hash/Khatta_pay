@@ -615,7 +615,7 @@ export default function App() {
     return clean.trim();
   };
 
-  const processInput = (textToProcess?: string) => {
+  const processInput = async (textToProcess?: string) => {
     const raw = (textToProcess ?? inputText).trim();
     if (!raw) {
       setStatusMessage("Baraye meherbani aawaz ya text darj karein.");
@@ -623,10 +623,25 @@ export default function App() {
       return;
     }
 
+    let ollamaData: any = null;
+    try {
+      const res = await fetch('/api/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: raw }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'success' && json.parsed) {
+          ollamaData = json;
+        }
+      }
+    } catch (_) {}
+
     const lower = raw.toLowerCase();
 
     // 1. Check Query: Daily Summary
-    if (lower.includes("aaj ka hisaab") || lower.includes("daily summary") || lower.includes("aaj ka total")) {
+    if (ollamaData?.parsed?.intent === "daily_summary" || lower.includes("aaj ka hisaab") || lower.includes("daily summary") || lower.includes("aaj ka total")) {
       const todayCredits = transactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
       const todayPayments = transactions.filter(t => t.type === 'payment').reduce((s, t) => s + t.amount, 0);
       setStatusMessage(`📅 Aaj Ka Hisaab: Kul Udhaar Rs ${todayCredits.toLocaleString()} | Kul Wasooli Rs ${todayPayments.toLocaleString()} | Net Tabdeeli Rs ${(todayCredits - todayPayments).toLocaleString()}`);
@@ -636,7 +651,7 @@ export default function App() {
     }
 
     // 2. Check Query: Top Debtors
-    if (lower.includes("sab se zyada") || lower.includes("top debtor") || lower.includes("highest udhaar")) {
+    if (ollamaData?.parsed?.intent === "top_debtors" || lower.includes("sab se zyada") || lower.includes("top debtor") || lower.includes("highest udhaar")) {
       const top = [...customers].sort((a, b) => b.balance - a.balance).filter(c => c.balance > 0)[0];
       setStatusMessage(top ? `📊 Sab se zyada udhaar ${top.name} ka hai (Rs ${top.balance.toLocaleString()}).` : "Sab accounts clear hain!");
       setStatusType("info");
@@ -645,8 +660,8 @@ export default function App() {
     }
 
     // 3. Check Query: Balance Inquiry
-    if (lower.includes("kitna baqaya") || lower.includes("balance") || lower.includes("kitna dena")) {
-      const targetToken = raw.split(/\s+(?:ka|ki|ko|ke|کا|کی|کو)\b/i)[0];
+    if (ollamaData?.parsed?.intent === "ask_balance" || lower.includes("kitna baqaya") || lower.includes("balance") || lower.includes("kitna dena")) {
+      const targetToken = ollamaData?.parsed?.customer || raw.split(/\s+(?:ka|ki|ko|ke|کا|کی|کو)\b/i)[0];
       const cleaned = cleanCustomerName(targetToken);
       const matched = customers.find(c => c.name.toLowerCase().includes(cleaned.toLowerCase()) || cleaned.toLowerCase().includes(c.name.toLowerCase()));
       if (matched) {
@@ -660,18 +675,17 @@ export default function App() {
     }
 
     // 4. Check Transaction: Credit vs Payment
-    const isPayment = (lower.includes("wapas") || lower.includes("jama") || lower.includes("wasool") || lower.includes("ada")) && !lower.includes("udhaar");
+    const isPayment = ollamaData?.parsed?.intent === "add_payment" || ((lower.includes("wapas") || lower.includes("jama") || lower.includes("wasool") || lower.includes("ada")) && !lower.includes("udhaar"));
     const txType: 'credit' | 'payment' = isPayment ? 'payment' : 'credit';
 
-    const amount = extractAmountFromText(raw);
-    if (amount <= 0) {
+    const amount = ollamaData?.parsed?.amount ? parseInt(ollamaData.parsed.amount, 10) : extractAmountFromText(raw);
+    if (!amount || amount <= 0) {
       setStatusMessage("❌ Amount samajh nahi aayi. Baraye meherbani raqam wazeh likhein ya bolain.");
       setStatusType("error");
       return;
     }
 
-    const nameMatch = raw.match(/^(.*?)(?:\s+(?:ko|ne|ka|se|say|کو|نے|کا|سے)\b)/i);
-    const rawCustomer = nameMatch ? nameMatch[1] : raw.split(" ")[0];
+    const rawCustomer = ollamaData?.parsed?.customer || (raw.match(/^(.*?)(?:\s+(?:ko|ne|ka|se|say|کو|نے|کا|سے)\b)/i)?.[1] || raw.split(" ")[0]);
     const cleanedCustomer = cleanCustomerName(rawCustomer) || "Customer";
 
     const existing = customers.find(c => c.name.toLowerCase().includes(cleanedCustomer.toLowerCase()) || cleanedCustomer.toLowerCase().includes(c.name.toLowerCase()));
@@ -681,15 +695,19 @@ export default function App() {
       setStatusMessage(`⚠️ Note: Wasooli (Rs ${amount}) exceeds current balance of Rs ${existing.balance}. Dukandar override allowed.`);
     }
 
-    let item: string | undefined;
-    let qty: string | undefined;
-    if (lower.includes("cheeni")) item = "cheeni";
-    else if (lower.includes("atta")) item = "atta";
-    else if (lower.includes("anday")) item = "anday";
-    else if (lower.includes("oil")) item = "oil";
+    let item: string | undefined = ollamaData?.parsed?.item;
+    let qty: string | undefined = ollamaData?.parsed?.quantity;
+    if (!item) {
+      if (lower.includes("cheeni")) item = "cheeni";
+      else if (lower.includes("atta")) item = "atta";
+      else if (lower.includes("anday")) item = "anday";
+      else if (lower.includes("oil")) item = "oil";
+    }
 
-    const qtyMatch = raw.match(/(\d+|\b(?:do|teen|char|paanch|ek)\b)\s*(?:kilo|kg|dozen|darjan)\b/i);
-    if (qtyMatch) qty = qtyMatch[0];
+    if (!qty) {
+      const qtyMatch = raw.match(/(\d+|\b(?:do|teen|char|paanch|ek)\b)\s*(?:kilo|kg|dozen|darjan)\b/i);
+      if (qtyMatch) qty = qtyMatch[0];
+    }
 
     const typeLabel = txType === 'credit' ? 'udhaar' : 'wasooli / payment';
     const itemDetails = item ? ` (${qty || ''} ${item})` : '';
@@ -708,8 +726,9 @@ export default function App() {
 
     setPendingTx(pending);
     setConfirmationPrompt(`${finalCustName}${newTag} — ${amount.toLocaleString()} rupay ${typeLabel}${itemDetails}. Save karein?`);
-    setStatusMessage("⏳ Entry tasdeeq ke liye tayyar hai. Confirm-Before-Save check.");
-    setStatusType("info");
+    const sourceLabel = ollamaData ? "🤖 Analyzed by Local Ollama (qwen2.5:3b)" : "⚡ Analyzed via Fast Local Rules";
+    setStatusMessage(`✅ ${sourceLabel} — Entry tasdeeq ke liye tayyar hai.`);
+    setStatusType("success");
   };
 
   const handleConfirm = () => {
