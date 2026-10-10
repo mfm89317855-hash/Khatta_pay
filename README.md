@@ -1,3 +1,15 @@
+---
+title: Khatta Pay - Voice First AI Ledger
+emoji: 🎙️
+colorFrom: green
+colorTo: emerald
+sdk: gradio
+sdk_version: 5.25.2
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # 🎙️ Khatta Pay (کھاتہ پے)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
