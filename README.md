@@ -35,6 +35,7 @@ Khatta Pay empowers small neighborhood grocery stores, kiryanas, and pharmacies 
 - [Getting Started](#-getting-started)
 - [Configuration](#-configuration)
 - [Roadmap & Contributing](#-roadmap--contributing)
+- [Team & Authors](#-team--authors)
 - [License](#-license)
 
 ---
@@ -247,6 +248,15 @@ Please read our [**Contributing Guide (CONTRIBUTING.md)**](CONTRIBUTING.md) to l
 1. Submit bug reports and feature requests.
 2. Add new Urdu number idioms or honorific patterns.
 3. Open high-quality pull requests.
+
+---
+
+## 👥 Team & Authors
+
+| Member | Focus & Responsibilities |
+| :--- | :--- |
+| **Muhammad Fahad Mazhar** | **Frontend & Interface** — React, Gradio UI architecture, responsive design, and browser voice recognition |
+| **Muhammad Ayan** | **API Keys & Backend** — API keys configuration, pipeline orchestration, model fallbacks, and SQLite database |
 
 ---
 
