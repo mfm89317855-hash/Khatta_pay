@@ -1,0 +1,6 @@
+{
+  "name": "KhataTalk - Voice-First AI Ledger",
+  "description": "Offline, voice-first AI ledger for small shopkeepers in Pakistan supporting Urdu, Roman Urdu, and English.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

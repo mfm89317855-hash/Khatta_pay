@@ -1,0 +1,48 @@
+[
+  {
+    "input": "Ahmed ko do kilo cheeni udhaar di, 400 rupay",
+    "expected_intent": "add_credit",
+    "expected_customer": "Ahmed",
+    "expected_amount": 400,
+    "expected_type": "credit"
+  },
+  {
+    "input": "Bilal ne 500 rupay wapas kiye",
+    "expected_intent": "add_payment",
+    "expected_customer": "Bilal",
+    "expected_amount": 500,
+    "expected_type": "payment"
+  },
+  {
+    "input": "Ahmed ka kitna baqaya hai?",
+    "expected_intent": "ask_balance",
+    "expected_customer": "Ahmed"
+  },
+  {
+    "input": "ahmad bhai ko ek dozen anday udhaar, 360",
+    "expected_intent": "add_credit",
+    "expected_customer": "Ahmad",
+    "expected_amount": 360,
+    "expected_type": "credit"
+  },
+  {
+    "input": "احمد کو دو کلو چینی ادھار دی چار سو روپے",
+    "expected_intent": "add_credit",
+    "expected_customer": "احمد",
+    "expected_amount": 400,
+    "expected_type": "credit"
+  },
+  {
+    "input": "Aaj ka hisaab dikhao",
+    "expected_intent": "daily_summary"
+  },
+  {
+    "input": "Sab se zyada udhaar kiska hai?",
+    "expected_intent": "top_debtors"
+  },
+  {
+    "input": "Tariq sahab ko payment reminder bhejo",
+    "expected_intent": "draft_reminder",
+    "expected_customer": "Tariq"
+  }
+]
