@@ -149,7 +149,9 @@ export default function App() {
   const [customers, setCustomers] = useState<Customer[]>(() => {
     try {
       const saved = localStorage.getItem('khattapay_customers');
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(c => c && typeof c === 'object' && typeof c.id !== 'undefined') : [];
     } catch {
       return [];
     }
@@ -158,7 +160,9 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     try {
       const saved = localStorage.getItem('khattapay_transactions');
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(t => t && typeof t === 'object' && typeof t.id !== 'undefined') : [];
     } catch {
       return [];
     }
@@ -184,7 +188,10 @@ export default function App() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopLiveSession();
+      try {
+        if (wsRef.current) wsRef.current.close();
+        if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
+      } catch (_) {}
     };
   }, []);
 
